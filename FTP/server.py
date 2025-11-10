@@ -1,73 +1,203 @@
+"""
+FTP Server Implementation
+
+Protocol:
+1. Create TCP socket
+2. Bind IP + Port
+3. Listen for connections
+4. Send confirmation to client that connection is accepted
+5. Await commands from client
+   * LS  -> list files in server directory
+   * GET -> sends copy of file to client
+   * PUT -> receives file from client and saves to server directory
+   * QUIT -> closes connection
+"""
+
 import os
 import socket
-import commands as command
-import json
+import protocol
 
 SERVER_FILE_DIR = os.path.join(os.path.dirname(__file__), 'server_files')
-FILE_LIST = os.listdir(SERVER_FILE_DIR)
 IP = '127.0.0.1'
 PORT = 5002
 
+COMMANDS = ["LS", "GET", "PUT", "QUIT"]
 
-def file_in_directory(filename):
-    return True if filename in FILE_LIST else False
+def validate_command(command):
+    response_code = 200
+    response = "OK"
 
-def get_file_path(file_name):
-    return os.path.join(SERVER_FILE_DIR, file_name)
+    if command not in COMMANDS:
+        response = f"Invalid Command, command: \"{command}\" unknown. "
+        response_code = 400
 
-def send_file(file_path, connection):
-    with open(file_path, "rb") as f:
-        while True:
-            chunk = f.read(1024)
-            if not chunk:
-                break   
-            connection.sendall(chunk)
+    return response_code, response
+
+def get_file_list():
+    """Get list of files in server directory"""
+    return os.listdir(SERVER_FILE_DIR)
+
+
+def file_exists(filename):
+    """Check if file exists in server directory"""
+    return filename in get_file_list()
+
+
+def get_file_path(filename):
+    """Get full path to file in server directory"""
+    return os.path.join(SERVER_FILE_DIR, filename)
+
+
+def handle_ls(connection):
+    """Handle LS command - list all files"""
+    file_list = get_file_list()
+    protocol.send_message(connection, {
+        "type": "response",
+        "code": 200,
+        "message": "OK",
+        "data": {"files": file_list}
+    })
+    print(f"LS: Sent {len(file_list)} files")
+
+
+def handle_get(connection, filename):
+    """Handle GET command - send file to client"""
+    if not filename:
+        protocol.send_message(connection, {
+            "type": "response",
+            "code": 400,
+            "message": "Bad Request: filename required"
+        })
+        return
+
+    if not file_exists(filename):
+        protocol.send_message(connection, {
+            "type": "response",
+            "code": 404,
+            "message": f"File Not Found: {filename}"
+        })
+        print(f"GET: File not found - {filename}")
+        return
+
+    # Send success response
+    protocol.send_message(connection, {
+        "type": "response",
+        "code": 200,
+        "message": "OK"
+    })
+
+    # Send the file
+    filepath = get_file_path(filename)
+    protocol.send_file(connection, filename, filepath)
+    print(f"GET: Sent file - {filename}")
+
+
+def handle_put(connection, filename):
+    """Handle PUT command - receive file from client"""
+    if not filename:
+        protocol.send_message(connection, {
+            "type": "response",
+            "code": 400,
+            "message": "Bad Request: filename required"
+        })
+        return
+
+    # Send ready response
+    protocol.send_message(connection, {
+        "type": "response",
+        "code": 200,
+        "message": "Ready to receive file"
+    })
+
+    # Receive the file
+    filepath = get_file_path(filename)
+    result = protocol.recv_file(connection, filepath)
+
+    if result:
+        print(f"PUT: Received file - {filename} ({result['bytes_received']} bytes)")
+    else:
+        print(f"PUT: Failed to receive file - {filename}")
+
 
 def serve():
-    
+    """Main server loop"""
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((IP, PORT))   # Bind to IP + Port
-    server.listen(1)                   # Listen for connections
-    print("Server waiting for connection...")
+    server.bind((IP, PORT))
+    server.listen(1)
+    print(f"Server listening on {IP}:{PORT}")
+    print(f"Server directory: {SERVER_FILE_DIR}\n")
 
     try:
         while True:
-            #Await connection
+            # Wait for connection
             connection, address = server.accept()
-            print("Connected by", address)
-            
-            #Acknowledge Client Connection            
-            connection.sendall(b"200: OK, Connection established")
-            
-            # Client Connected. Loop Begins:
+            print(f"Connected by {address}")
+
+            # Send connection acknowledgment
+            protocol.send_message(connection, {
+                "type": "connection",
+                "code": 200,
+                "message": "Connection established"
+            })
+
+            # Handle client commands
             while True:
-                message = connection.recv(1024).decode()
-                if not message:
+                # Receive command message
+                msg = protocol.recv_message(connection)
+                if not msg:
+                    print("Client disconnected")
                     break
-                
-                #Parse client command
-                client_command, filename = command.parse(message)
 
-                #validate Command
-                response_code, response = command.validate(client_command)
-                
-                #send response code
-                connection.sendall(response_code.encode())
+                # Parse command
+                msg_type = msg.get("type")
+                if msg_type != "command":
+                    print(f"Unknown message type: {msg_type}")
+                    continue
 
-                #if good reqest
-                if response_code == 200:
-                    if client_command == "LS":
-                        payload = json.dumps(FILE_LIST)
-                        connection.sendall(payload.encode())
+                client_command = msg.get("command", "").upper()
+                filename = msg.get("filename")
+
+                print(f"Received command: {client_command}" + (f" {filename}" if filename else ""))
+
+                # Validate command
+                response_code, response_msg = validate_command(client_command)
+
+                if response_code != 200:
+                    # Invalid command
+                    protocol.send_message(connection, {
+                        "type": "response",
+                        "code": response_code,
+                        "message": response_msg
+                    })
+                    continue
+
+                # Execute command
+                if client_command == "LS":
+                    handle_ls(connection)
+
+                elif client_command == "GET":
+                    handle_get(connection, filename)
+
+                elif client_command == "PUT":
+                    handle_put(connection, filename)
+
+                elif client_command == "QUIT":
+                    protocol.send_message(connection, {
+                        "type": "response",
+                        "code": 200,
+                        "message": "Goodbye"
+                    })
+                    print("Client requested disconnect")
                     break
-                    
-            
-
 
             connection.close()
+            print("Connection closed\n")
+
+    except KeyboardInterrupt:
+        print("\nServer shutting down...")
     finally:
         server.close()
-    
+
 
 if __name__ == "__main__":
     serve()
