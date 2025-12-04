@@ -13,8 +13,8 @@ import socket
 import protocol
 
 CLIENT_FILE_DIR = os.path.join(os.path.dirname(__file__), 'client_files')
-SERVER_IP = '127.0.0.1'
-SERVER_PORT = 5002
+SERVER_IP = '3.101.117.119'
+SERVER_PORT = 5000
 
 VALID_COMMANDS = ["LS", "GET", "PUT", "QUIT"]
 
