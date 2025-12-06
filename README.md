@@ -46,7 +46,7 @@ FTP/
 python FTP/server.py
 ```
 
-The server will start listening on `127.0.0.1:5002` by default.
+The server will start listening on `127.0.0.1:5000` by default.
 
 ### Running the Client
 

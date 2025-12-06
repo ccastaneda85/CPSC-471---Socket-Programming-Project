@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 SERVER_FILE_DIR = os.path.join(os.path.dirname(__file__), 'server_files')
 IP = '127.0.0.1'
-PORT = 5002
+PORT = 5000
 
 COMMANDS = ["LS", "GET", "PUT", "QUIT"]
 
