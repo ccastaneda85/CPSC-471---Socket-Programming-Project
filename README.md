@@ -104,7 +104,7 @@ Default settings can be modified in the respective files:
    ```bash
    python FTP/server.py
    ```
-   The server will start listening on `127.0.0.1:5002`
+   The server will start listening on `127.0.0.1:5000`
 
 2. **Run the client** (in a separate terminal):
    ```bash
